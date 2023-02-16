@@ -44,7 +44,7 @@ const char trigger[] = "XYZ";
 unsigned volatile t_point;
 
 /* RECEPTION DATA BUFFER */
-#define R_BUF_SIZE (6)
+#define R_BUF_SIZE (32)
 uint8_t r_buffer[R_BUF_SIZE];
 unsigned volatile r_point;
 
@@ -88,6 +88,7 @@ typedef struct komande {
 	uint8_t duzina;
 }komande;
 
+uint8_t Seg_data[10] = {0};
 
 /* GLOBAL OS-HANDLES */
 SemaphoreHandle_t LED_INT_BinarySemaphore;
@@ -262,20 +263,20 @@ void Prijem_sa_senzora(void* pvParameters)
 /*Ispisivanje vrednosti na 7seg displej*/
 void Seg7_ispis_task(void* pvParameters)
 {
-	uint8_t SegNum;
+	uint8_t Seg_data;
 	int i;
 	while (1)
 	{
 		for (i = 0; i < 10; i++) {
-			xQueueReceive(Seg7Queue, &SegNum, portMAX_DELAY);
+			xQueueReceive(Seg7Queue, &Seg_data, portMAX_DELAY);
 			select_7seg_digit(i);
-			set_7seg_digit(hexnum[SegNum]);
+			set_7seg_digit(hexnum[Seg_data]);
 		}
 	}
 
 
 }
-/*This task implements LED display */
+
 void AlarmTask(void* pvParameters)
 {
 	uint8_t led = LED_OFF;
@@ -288,7 +289,13 @@ void AlarmTask(void* pvParameters)
 		if ((temp_led == led) && (ALARM_ON == led))
 		{/*ugasiti sve ledovke ako je alarm ukljucen*/
 			led = ALARM_ON;
-			set_LED_BAR(1, led);
+
+			
+				set_LED_BAR(1, led);
+				vTaskDelay(pdMS_TO_TICKS(200));
+				set_LED_BAR(1, LED_OFF);
+				vTaskDelay(pdMS_TO_TICKS(200));
+			
 		}
 		else
 		{
@@ -407,36 +414,39 @@ void SerialSend_Task(void* pvParameters)
 		}
 		if (0u == t_point)/*ako je prvi karakter od trigera blokiraj task*/
 		{
-			xSemaphoreTake(TBE_BinarySemaphore, portMAX_DELAY);/*blokiraj task na 100ms*/
+			vTaskDelay(pdMS_TO_TICKS(200)); // kada se koristi vremenski delay }
+			//xSemaphoreTake(TBE_BinarySemaphore, portMAX_DELAY);/*blokiraj task na 100ms*/
 		}
 		send_serial_character(COM_CH, trigger[t_point++]); /*slanje trigera*/
-		xSemaphoreTake(TBE_BinarySemaphore, portMAX_DELAY);/*blokiraj task dok se ne isprani bafer*/
+		vTaskDelay(pdMS_TO_TICKS(200)); // kada se koristi vremenski delay }
+	//xSemaphoreTake(TBE_BinarySemaphore, portMAX_DELAY);/*blokiraj task dok se ne isprani bafer*/
 	}
-}
+} 
 
 void SerialReceive_Task(void* pvParameters)
 {
+	uint8_t r_point = 0;
+	uint8_t r_buffer[7] = {0};
 	uint8_t cc = 0;
+	
+	
 	uint8_t podatak = OFF;
-	/*static uint8_t loca = 0; */
+	static uint8_t loca = 0; 
 	vrednost_senzora SensTemp;
 	while (1)
 	{
 		xSemaphoreTake(RXC_BinarySemaphore, portMAX_DELAY);/*blokiraj task dok ne primimo karakter*/
 		get_serial_character(COM_CH, &cc);
 
-		if ((0x00 == cc) && (R_BUF_SIZE == r_point))
+		if (cc == 0xff) // oznaciti kraj poruke i ako je kraj, preko reda poslati informacije o poruci i restartovati ovaj taks
 		{
-			r_point = 0;
-		}
-		else if ((cc == 0xff) && (R_BUF_SIZE == r_point))
-		{/*provera da li je vrednost nekog senzora ff da ne zavrsimo ranije*/
 
-			SensTemp.temp_vazduha = r_buffer[0];
-			SensTemp.temp_rashladne_tecnosti = r_buffer[1];
-			SensTemp.obrtaji = ((uint16_t)r_buffer[2] << 8u) | (uint16_t)r_buffer[3];
-			SensTemp.temp_usisna_grana = r_buffer[4];
-			SensTemp.pedala_gasa = r_buffer[5];
+			SensTemp.temp_vazduha = r_buffer[2];
+			SensTemp.temp_rashladne_tecnosti = r_buffer[3];
+			SensTemp.obrtaji = r_buffer[4];
+			SensTemp.temp_usisna_grana = r_buffer[5];
+			SensTemp.pedala_gasa = r_buffer[6];
+			r_point = 0;
 			xQueueSend(SensorQueue, &SensTemp, 0U);
 		}
 		else if (r_point < R_BUF_SIZE)// pamti karaktere izmedju 0 i FF
@@ -450,9 +460,10 @@ void SerialReceive_Task(void* pvParameters)
 	}
 }
 
+
 void Seg7Data(vrednost_senzora SensTemp, uint8_t podatak)
 {
-	uint8_t Seg_data[10] = { 0 };
+	uint8_t Seg_data[10] ;
 	int i;
 	switch (podatak)
 	{
